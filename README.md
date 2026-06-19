@@ -2,6 +2,8 @@
 
 A tiny always-on-top Windows desktop widget that shows your **Claude Code usage** in real time — the same numbers as the `/usage` panel, plus a per-session token breakdown.
 
+![widget](docs/widget.png)
+
 ## What it shows
 
 - **5-hour limit**, **Weekly (all models)**, **Sonnet only** — official utilization % and reset times, pulled live from Anthropic's usage endpoint (`/api/oauth/usage`, the same source `/usage` uses).
