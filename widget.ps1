@@ -22,10 +22,12 @@ function ResetText($iso) {
 }
 # Official usage from the same endpoint /usage uses (token read fresh each poll, so Claude Code's refresh is picked up)
 function Get-Usage {
-  $tok = (Get-Content $creds -Raw | ConvertFrom-Json).claudeAiOauth.accessToken
-  if (-not $tok) { return $null }
-  $h = @{ Authorization = "Bearer $tok"; 'anthropic-beta' = 'oauth-2025-04-20'; 'anthropic-version' = '2023-06-01' }
-  Invoke-RestMethod -Uri 'https://api.anthropic.com/api/oauth/usage' -Headers $h -TimeoutSec 8
+  try {
+    $tok = (Get-Content $creds -Raw | ConvertFrom-Json).claudeAiOauth.accessToken
+    if (-not $tok) { return $null }
+    $h = @{ Authorization = "Bearer $tok"; 'anthropic-beta' = 'oauth-2025-04-20'; 'anthropic-version' = '2023-06-01' }
+    return Invoke-RestMethod -Uri 'https://api.anthropic.com/api/oauth/usage' -Headers $h -TimeoutSec 8
+  } catch { return $null }   # 429 / timeout / expired -> caller keeps last good value
 }
 # This-session token breakdown from the most recently active transcript (endpoint doesn't provide it)
 function Session-Breakdown {
@@ -124,14 +126,18 @@ function SetRow($info,$bar,$util,$resetIso) {
   $info.Text = (ResetText $resetIso) + '    ' + ('{0:N0}%' -f $util)
   $bar.Width = [int]([math]::Min(100,$util) * $barW / 100)
 }
+$script:lastU=$null; $script:tick=0
 function Refresh {
-  $u = Get-Usage
+  # poll the usage endpoint only every 4th tick (~60s) so we don't get 429'd
+  if ($script:tick % 4 -eq 0) { $u = Get-Usage; if ($u) { $script:lastU = $u } }
+  $script:tick++
+  $u = $script:lastU
   if ($u) {
     SetRow $r1info $r1bar $u.five_hour.utilization        $u.five_hour.resets_at
     SetRow $r2info $r2bar $u.seven_day.utilization         $u.seven_day.resets_at
     SetRow $r3info $r3bar $u.seven_day_sonnet.utilization  $u.seven_day_sonnet.resets_at
   } else {
-    $r1info.Text='auth? run Claude Code'; $r2info.Text=''; $r3info.Text=''
+    $r1info.Text='loading...'; $r2info.Text=''; $r3info.Text=''   # only until first successful fetch
   }
   $s = Session-Breakdown
   $sVals['Input'].Text=Fmt $s.In; $sVals['Output'].Text=Fmt $s.Out

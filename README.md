@@ -26,7 +26,7 @@ Auto-start on login: drop a shortcut to `桌面小工具.vbs` into `shell:startu
 
 ## Notes
 
-- The token is read fresh on every poll (every 15s), so when Claude Code refreshes it the widget keeps working. If it expires and isn't refreshed, the widget shows `auth? run Claude Code`.
+- The usage endpoint is polled every ~60s (to avoid rate limits); the session breakdown updates every 15s. The token is read fresh each poll, so it keeps working after Claude Code refreshes it. On a transient failure (429/timeout) the last good values are kept; `loading...` shows only until the first successful fetch.
 - "This session" matches `/usage` only at the same instant — it keeps changing as you work.
 
 ## How it works
@@ -59,7 +59,7 @@ Auto-start on login: drop a shortcut to `桌面小工具.vbs` into `shell:startu
 
 ### 說明
 
-- 每次輪詢（每 15 秒）都會重新讀取 token，所以 Claude Code 換新 token 後仍可運作；若 token 過期且未刷新，會顯示 `auth? run Claude Code`。
+- 用量 endpoint 每約 60 秒輪詢一次（避免被限流），session 明細每 15 秒更新。每次都重新讀取 token，所以 Claude Code 換新 token 後仍可運作；遇到暫時性失敗（429／逾時）會沿用上一次的數值，只有在首次成功取得前才顯示 `loading...`。
 - **This session** 只有在同一瞬間才會跟 `/usage` 完全一致——你持續操作時數字會一直變動。
 
 ### 運作原理
