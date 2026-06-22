@@ -20,14 +20,42 @@ function ResetText($iso) {
   if ($d.Date -eq (Get-Date).Date) { 'Resets ' + $d.ToString('h:mm tt', $inv) }
   else { 'Resets ' + $d.ToString('MMM d', $inv) }
 }
-# Official usage from the same endpoint /usage uses (token read fresh each poll, so Claude Code's refresh is picked up)
+$clientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'   # Claude Code public OAuth client id
+
+# Refresh the access token using the stored refresh token; saves the rotated tokens back. Returns new access token or $null.
+function Refresh-Token {
+  try {
+    $root = Get-Content $creds -Raw | ConvertFrom-Json
+    $o = $root.claudeAiOauth
+    $body = @{ grant_type='refresh_token'; refresh_token=$o.refreshToken; client_id=$clientId } | ConvertTo-Json
+    $r = Invoke-RestMethod -Uri 'https://console.anthropic.com/v1/oauth/token' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 12
+    $o.accessToken = $r.access_token
+    if ($r.refresh_token) { $o.refreshToken = $r.refresh_token }
+    $o.expiresAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + ([int64]$r.expires_in * 1000)
+    [IO.File]::WriteAllText($creds, ($root | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding $false))  # no BOM (Claude Code's JSON.parse rejects it)
+    return $r.access_token
+  } catch { return $null }
+}
+# Official usage from the same endpoint /usage uses; auto-refreshes the token when expired/401
 function Get-Usage {
   try {
-    $tok = (Get-Content $creds -Raw | ConvertFrom-Json).claudeAiOauth.accessToken
+    $c = (Get-Content $creds -Raw | ConvertFrom-Json).claudeAiOauth
+    $tok = $c.accessToken
     if (-not $tok) { return $null }
+    # proactively refresh if expired (or within 60s) so we don't burn a guaranteed 401
+    if ($c.expiresAt -and ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge ([int64]$c.expiresAt - 60000))) {
+      $nt = Refresh-Token; if ($nt) { $tok = $nt }
+    }
     $h = @{ Authorization = "Bearer $tok"; 'anthropic-beta' = 'oauth-2025-04-20'; 'anthropic-version' = '2023-06-01' }
-    return Invoke-RestMethod -Uri 'https://api.anthropic.com/api/oauth/usage' -Headers $h -TimeoutSec 8
-  } catch { return $null }   # 429 / timeout / expired -> caller keeps last good value
+    try { return Invoke-RestMethod -Uri 'https://api.anthropic.com/api/oauth/usage' -Headers $h -TimeoutSec 8 }
+    catch {
+      if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) {
+        $nt = Refresh-Token
+        if ($nt) { $h.Authorization = "Bearer $nt"; return Invoke-RestMethod -Uri 'https://api.anthropic.com/api/oauth/usage' -Headers $h -TimeoutSec 8 }
+      }
+      return $null   # 429 / timeout -> caller keeps last good value
+    }
+  } catch { return $null }
 }
 # This-session token breakdown from the most recently active transcript (endpoint doesn't provide it)
 function Session-Breakdown {
